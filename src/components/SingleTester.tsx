@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   KeyRound,
   Eye,
@@ -17,26 +17,34 @@ import {
   Server,
   Sliders,
   Terminal,
+  Plus,
 } from 'lucide-react';
-import { ApiProviderId, TestType, TestResult } from '../types';
-import { PROVIDERS } from '../data/providers';
+import { ApiProviderId, TestType, TestResult, CustomProviderConfig } from '../types';
+import { getAllProviders } from '../utils/customProviders';
 import { DiagnosticCard } from './DiagnosticCard';
 import { ResponseInspector } from './ResponseInspector';
 
 interface SingleTesterProps {
   onAddHistory: (result: TestResult) => void;
   systemGeminiConfigured: boolean;
+  customProviders?: CustomProviderConfig[];
+  initialProvider?: ApiProviderId;
   onOpenChat?: (provider: ApiProviderId, apiKey: string) => void;
   onOpenClaudeConfig?: (apiKey: string, provider?: ApiProviderId) => void;
+  onOpenCustomManager?: () => void;
 }
 
 export const SingleTester: React.FC<SingleTesterProps> = ({
   onAddHistory,
   systemGeminiConfigured,
+  customProviders,
+  initialProvider,
   onOpenChat,
   onOpenClaudeConfig,
+  onOpenCustomManager,
 }) => {
-  const [provider, setProvider] = useState<ApiProviderId>('gemini');
+  const allProviders = getAllProviders(customProviders);
+  const [provider, setProvider] = useState<ApiProviderId>(initialProvider || 'gemini');
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [testType, setTestType] = useState<TestType>('ping');
@@ -46,7 +54,21 @@ export const SingleTester: React.FC<SingleTesterProps> = ({
   const [currentResult, setCurrentResult] = useState<TestResult | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
 
-  const activeProvider = PROVIDERS.find(p => p.id === provider) || PROVIDERS[0];
+  // Sync if initialProvider prop changes
+  useEffect(() => {
+    if (initialProvider) {
+      setProvider(initialProvider);
+    }
+  }, [initialProvider]);
+
+  const activeProvider = allProviders.find(p => p.id === provider) || allProviders[0];
+
+  // Prefill sample key if switching to custom provider with saved key
+  useEffect(() => {
+    if (activeProvider.isCustom && activeProvider.customConfig?.apiKey && !apiKey) {
+      setApiKey(activeProvider.customConfig.apiKey);
+    }
+  }, [provider]);
 
   const handlePasteKey = async () => {
     try {
@@ -64,7 +86,11 @@ export const SingleTester: React.FC<SingleTesterProps> = ({
 
   const handleRunTest = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!apiKey && provider !== 'custom') {
+
+    const isCustom = activeProvider.isCustom;
+    const authNone = activeProvider.customConfig?.authHeaderType === 'none';
+
+    if (!apiKey && provider !== 'custom' && !isCustom && !authNone) {
       setErrorMsg('Vui lòng nhập API Key để kiểm tra');
       return;
     }
@@ -75,17 +101,28 @@ export const SingleTester: React.FC<SingleTesterProps> = ({
 
     const modelToUse = customModel.trim() || activeProvider.defaultModel;
 
+    const requestPayload: any = {
+      provider,
+      apiKey,
+      testType,
+      model: modelToUse,
+      promptText,
+    };
+
+    if (activeProvider.customConfig) {
+      requestPayload.customConfig = {
+        baseUrl: activeProvider.customConfig.baseUrl,
+        authHeaderType: activeProvider.customConfig.authHeaderType,
+        customHeaderName: activeProvider.customConfig.customHeaderName,
+        defaultModel: activeProvider.customConfig.defaultModel,
+      };
+    }
+
     try {
       const res = await fetch('/api/test-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider,
-          apiKey,
-          testType,
-          model: modelToUse,
-          promptText,
-        }),
+        body: JSON.stringify(requestPayload),
       });
 
       const data = await res.json();
@@ -147,11 +184,23 @@ export const SingleTester: React.FC<SingleTesterProps> = ({
     <div className="space-y-6">
       {/* Provider Selector Cards */}
       <div>
-        <label className="block text-xs font-bold text-neutral-700 uppercase tracking-wider mb-2.5">
-          1. Chọn Dịch vụ / Nhà cung cấp AI
-        </label>
+        <div className="flex items-center justify-between mb-2.5">
+          <label className="text-xs font-bold text-neutral-700 uppercase tracking-wider">
+            1. Chọn Dịch vụ / Nhà cung cấp AI
+          </label>
+          {onOpenCustomManager && (
+            <button
+              type="button"
+              onClick={onOpenCustomManager}
+              className="px-2.5 py-1 text-xs font-semibold text-cyan-700 hover:text-cyan-900 bg-cyan-50 hover:bg-cyan-100 rounded-lg border border-cyan-200 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Thêm Nhà cung cấp tùy chỉnh
+            </button>
+          )}
+        </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2.5">
-          {PROVIDERS.filter(p => p.id !== 'custom').map(p => {
+          {allProviders.map(p => {
             const isSelected = provider === p.id;
             return (
               <button
@@ -175,17 +224,21 @@ export const SingleTester: React.FC<SingleTesterProps> = ({
                     className="w-2.5 h-2.5 rounded-full"
                     style={{ backgroundColor: p.color }}
                   />
-                  {isSelected && (
+                  {isSelected ? (
                     <span className="text-[10px] font-bold text-blue-700 bg-blue-100/80 px-1.5 py-0.2 rounded">
                       Đã chọn
                     </span>
-                  )}
+                  ) : p.isCustom ? (
+                    <span className="text-[9px] font-semibold text-cyan-700 bg-cyan-50 px-1 py-0.2 rounded border border-cyan-200/50">
+                      Tùy chỉnh
+                    </span>
+                  ) : null}
                 </div>
                 <div className="font-semibold text-neutral-900 text-xs sm:text-sm truncate w-full">
                   {p.name}
                 </div>
                 <div className="text-[11px] text-neutral-500 font-mono truncate w-full mt-0.5">
-                  {p.keyPrefix ? `${p.keyPrefix}...` : 'API Key'}
+                  {p.isCustom ? (p.customConfig?.authHeaderType === 'none' ? 'No-Key' : p.placeholder) : p.keyPrefix ? `${p.keyPrefix}...` : 'API Key'}
                 </div>
               </button>
             );
@@ -330,6 +383,40 @@ export const SingleTester: React.FC<SingleTesterProps> = ({
               >
                 Mở Cấu Hình Claude CLI →
               </button>
+            </div>
+          )}
+
+          {activeProvider.isCustom && (
+            <div className="mt-2.5 p-2.5 bg-cyan-50/80 rounded-xl border border-cyan-200/70 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-cyan-950 animate-fadeIn">
+              <div className="flex items-center gap-2">
+                <Server className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
+                <span>
+                  Nhà cung cấp tùy chỉnh: <strong>{activeProvider.name}</strong> (<code>{activeProvider.customConfig?.baseUrl}</code>)
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {activeProvider.customConfig?.apiKey && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setApiKey(activeProvider.customConfig!.apiKey!);
+                      setErrorMsg('');
+                    }}
+                    className="px-2 py-0.5 text-xs font-semibold bg-cyan-600 text-white rounded hover:bg-cyan-700 transition-colors"
+                  >
+                    Dùng Key mẫu đã lưu
+                  </button>
+                )}
+                {onOpenCustomManager && (
+                  <button
+                    type="button"
+                    onClick={onOpenCustomManager}
+                    className="text-xs font-bold text-cyan-800 hover:text-cyan-950 underline cursor-pointer"
+                  >
+                    Chỉnh sửa cấu hình →
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>

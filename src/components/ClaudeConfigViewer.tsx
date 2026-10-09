@@ -26,6 +26,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { ApiProviderId } from '../types';
+import { getCustomProviders } from '../utils/customProviders';
 
 interface ClaudeConfigViewerProps {
   initialApiKey?: string;
@@ -557,10 +558,37 @@ export const ClaudeConfigViewer: React.FC<ClaudeConfigViewerProps> = ({
 
         {/* Custom Base URL if selected */}
         {providerType === 'custom' && (
-          <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-200 space-y-1 animate-fadeIn">
-            <label className="block text-xs font-semibold text-neutral-700">
-              ANTHROPIC_BASE_URL (URL Máy chủ Proxy):
-            </label>
+          <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-200 space-y-2 animate-fadeIn">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-semibold text-neutral-700">
+                ANTHROPIC_BASE_URL (URL Máy chủ Proxy / Custom Endpoint):
+              </label>
+              {getCustomProviders().length > 0 && (
+                <span className="text-[10px] text-neutral-500 font-medium">
+                  Chọn từ nhà cung cấp đã thêm:
+                </span>
+              )}
+            </div>
+
+            {getCustomProviders().length > 0 && (
+              <div className="flex items-center flex-wrap gap-1.5 pb-1">
+                {getCustomProviders().map(cp => (
+                  <button
+                    key={cp.id}
+                    type="button"
+                    onClick={() => {
+                      setCustomBaseUrl(cp.baseUrl);
+                      if (cp.apiKey && !apiKey) setApiKey(cp.apiKey);
+                    }}
+                    className="px-2 py-0.5 text-xs bg-white hover:bg-neutral-100 text-neutral-800 rounded border border-neutral-200 font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: cp.color }} />
+                    {cp.name}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <input
               type="text"
               value={customBaseUrl}

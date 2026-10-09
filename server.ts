@@ -284,6 +284,33 @@ function parseModelDetails(provider: string, responseData: any): any[] {
         contextWindow: m.input_limit || undefined,
       });
     }
+  } else {
+    // Generic / Custom / OpenAI-compatible / Local server
+    const rawList = Array.isArray(responseData.data)
+      ? responseData.data
+      : Array.isArray(responseData.models)
+      ? responseData.models
+      : [];
+    for (const m of rawList) {
+      if (!m) continue;
+      const id = typeof m === 'string' ? m : m.id || m.name || '';
+      if (!id) continue;
+      const lowerId = id.toLowerCase();
+      let category: 'chat' | 'multimodal' | 'embedding' | 'reasoning' | 'audio' | 'other' = 'chat';
+      if (lowerId.includes('embed')) category = 'embedding';
+      else if (lowerId.includes('r1') || lowerId.includes('reasoning') || lowerId.includes('thinking')) category = 'reasoning';
+      else if (lowerId.includes('vision') || lowerId.includes('vl') || lowerId.includes('image')) category = 'multimodal';
+      else if (lowerId.includes('audio') || lowerId.includes('tts')) category = 'audio';
+
+      results.push({
+        id,
+        name: typeof m === 'object' && m.name ? m.name : id,
+        description: typeof m === 'object' ? m.description || '' : '',
+        category,
+        status: 'active',
+        ownedBy: typeof m === 'object' ? m.owned_by : undefined,
+      });
+    }
   }
 
   return results;
@@ -296,10 +323,14 @@ async function executeKeyTest(params: {
   promptText?: string;
   model?: string;
   customConfig?: {
-    url: string;
+    baseUrl?: string;
+    url?: string;
     method?: string;
     headers?: Record<string, string>;
     body?: string;
+    authHeaderType?: 'bearer' | 'x-api-key' | 'custom' | 'none';
+    customHeaderName?: string;
+    defaultModel?: string;
   };
 }) {
   const { provider, testType = 'ping', promptText = 'Say hello in 5 words', customConfig } = params;
@@ -310,7 +341,10 @@ async function executeKeyTest(params: {
     apiKey = process.env.GEMINI_API_KEY || '';
   }
 
-  if (!apiKey && provider !== 'custom') {
+  const isCustomProvider = provider === 'custom' || provider.startsWith('custom') || Boolean(customConfig?.baseUrl);
+  const authNone = customConfig?.authHeaderType === 'none';
+
+  if (!apiKey && !isCustomProvider && !authNone) {
     return {
       success: false,
       statusCode: 400,
@@ -462,27 +496,70 @@ async function executeKeyTest(params: {
         break;
       }
 
-      case 'custom': {
-        if (!customConfig?.url) {
-          throw new Error('Thiếu URL cho custom endpoint');
-        }
-        url = customConfig.url;
-        method = customConfig.method || 'GET';
-        if (customConfig.headers) {
-          Object.assign(headers, customConfig.headers);
-        }
-        if (apiKey && !headers['Authorization'] && !headers['authorization']) {
-          headers['Authorization'] = `Bearer ${apiKey}`;
-        }
-        if (customConfig.body && method !== 'GET') {
-          headers['Content-Type'] = headers['Content-Type'] || 'application/json';
-          body = customConfig.body;
-        }
-        break;
-      }
+      case 'custom':
+      default: {
+        // Check if this is a custom AI provider with baseUrl
+        if (customConfig?.baseUrl || provider.startsWith('custom')) {
+          const rawBase = (customConfig?.baseUrl || '').trim().replace(/\/+$/, '');
+          if (!rawBase) {
+            throw new Error('Thiếu Base URL cho Custom Provider');
+          }
 
-      default:
+          const authType = customConfig?.authHeaderType || 'bearer';
+          const headerName = (customConfig?.customHeaderName || 'x-api-key').trim();
+
+          if (apiKey && authType !== 'none') {
+            if (authType === 'bearer') {
+              headers['Authorization'] = `Bearer ${apiKey}`;
+            } else if (authType === 'x-api-key') {
+              headers['x-api-key'] = apiKey;
+            } else if (authType === 'custom' && headerName) {
+              headers[headerName] = apiKey;
+            }
+          }
+
+          if (testType === 'prompt') {
+            url = `${rawBase}/chat/completions`;
+            method = 'POST';
+            headers['Content-Type'] = 'application/json';
+            body = JSON.stringify({
+              model: params.model || customConfig?.defaultModel || 'default',
+              messages: [{ role: 'user', content: promptText }],
+              max_tokens: 40,
+            });
+          } else if (testType === 'models') {
+            url = rawBase.endsWith('/models') ? rawBase : `${rawBase}/models`;
+            method = 'GET';
+          } else {
+            // Ping test: try models endpoint
+            url = rawBase.endsWith('/models') ? rawBase : `${rawBase}/models`;
+            method = 'GET';
+          }
+          break;
+        }
+
+        // Raw Custom REST API tester
+        if (provider === 'custom') {
+          if (!customConfig?.url) {
+            throw new Error('Thiếu URL cho custom endpoint');
+          }
+          url = customConfig.url;
+          method = customConfig.method || 'GET';
+          if (customConfig.headers) {
+            Object.assign(headers, customConfig.headers);
+          }
+          if (apiKey && !headers['Authorization'] && !headers['authorization']) {
+            headers['Authorization'] = `Bearer ${apiKey}`;
+          }
+          if (customConfig.body && method !== 'GET') {
+            headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+            body = customConfig.body;
+          }
+          break;
+        }
+
         throw new Error(`Provider không được hỗ trợ: ${provider}`);
+      }
     }
 
     const controller = new AbortController();
@@ -628,7 +705,7 @@ app.post('/api/test-key', async (req, res) => {
 // Batch Key Test endpoint
 app.post('/api/test-batch', async (req, res) => {
   try {
-    const { provider, keys, testType = 'ping' } = req.body;
+    const { provider, keys, testType = 'ping', customConfig } = req.body;
     if (!Array.isArray(keys) || keys.length === 0) {
       return res.status(400).json({ error: 'Danh sách keys không được để trống' });
     }
@@ -649,6 +726,7 @@ app.post('/api/test-batch', async (req, res) => {
           provider,
           apiKey: key,
           testType,
+          customConfig,
         });
         return {
           index: i + chunkIdx + 1,
@@ -862,8 +940,39 @@ app.post('/api/chat-test', async (req, res) => {
         break;
       }
 
-      default:
+      default: {
+        const rawBase = (req.body.customBaseUrl || req.body.customConfig?.baseUrl || '').trim().replace(/\/+$/, '');
+        if (rawBase || provider.startsWith('custom') || provider === 'custom') {
+          if (!rawBase) {
+            return res.status(400).json({ error: 'Thiếu Base URL cho Custom Provider' });
+          }
+          url = `${rawBase}/chat/completions`;
+          const authType = req.body.customAuthHeaderType || req.body.customConfig?.authHeaderType || 'bearer';
+          const headerName = (req.body.customHeaderName || req.body.customConfig?.customHeaderName || 'x-api-key').trim();
+          if (actualKey && authType !== 'none') {
+            if (authType === 'bearer') {
+              headers['Authorization'] = `Bearer ${actualKey}`;
+            } else if (authType === 'x-api-key') {
+              headers['x-api-key'] = actualKey;
+            } else if (authType === 'custom' && headerName) {
+              headers[headerName] = actualKey;
+            }
+          }
+          const formattedMsgs: any[] = [];
+          if (systemInstruction) {
+            formattedMsgs.push({ role: 'system', content: systemInstruction });
+          }
+          formattedMsgs.push(...messages.map((m: any) => ({ role: m.role, content: m.content })));
+          body = {
+            model: selectedModel,
+            messages: formattedMsgs,
+            temperature: tempVal,
+            max_tokens: 1000,
+          };
+          break;
+        }
         return res.status(400).json({ error: `Provider không hỗ trợ chatbot: ${provider}` });
+      }
     }
 
     const controller = new AbortController();
@@ -1008,8 +1117,22 @@ app.post('/api/probe-model', async (req, res) => {
         openrouter: 'https://openrouter.ai/api/v1/chat/completions',
         kira: 'https://kiraai.vn/api/v1/chat/completions',
       };
-      url = baseUrls[provider] || 'https://api.openai.com/v1/chat/completions';
-      headers['Authorization'] = `Bearer ${actualKey}`;
+
+      const customBase = (req.body.customBaseUrl || req.body.customConfig?.baseUrl || '').trim().replace(/\/+$/, '');
+      if (customBase) {
+        url = `${customBase}/chat/completions`;
+        const authType = req.body.customAuthHeaderType || req.body.customConfig?.authHeaderType || 'bearer';
+        const headerName = (req.body.customHeaderName || req.body.customConfig?.customHeaderName || 'x-api-key').trim();
+        if (actualKey && authType !== 'none') {
+          if (authType === 'bearer') headers['Authorization'] = `Bearer ${actualKey}`;
+          else if (authType === 'x-api-key') headers['x-api-key'] = actualKey;
+          else if (authType === 'custom' && headerName) headers[headerName] = actualKey;
+        }
+      } else {
+        url = baseUrls[provider] || 'https://api.openai.com/v1/chat/completions';
+        headers['Authorization'] = `Bearer ${actualKey}`;
+      }
+
       if (provider === 'openrouter') {
         headers['HTTP-Referer'] = 'https://ai.studio';
         headers['X-Title'] = 'Model Health Probe';
@@ -1079,6 +1202,92 @@ app.post('/api/probe-model', async (req, res) => {
       latencyMs: 12000,
       probeStatus: 'unhealthy',
       message: isTimeout ? 'Hết thời gian chờ phản hồi (>12s)' : (err.message || 'Lỗi kết nối'),
+    });
+  }
+});
+
+// Auto fetch / probe models list from any OpenAI-compatible base URL
+app.post('/api/fetch-custom-models', async (req, res) => {
+  try {
+    const { baseUrl, apiKey, authHeaderType, customHeaderName } = req.body;
+    if (!baseUrl) {
+      return res.status(400).json({ success: false, error: 'Thiếu Base URL' });
+    }
+
+    const cleanBase = baseUrl.trim().replace(/\/+$/, '');
+    let targetUrl = cleanBase.endsWith('/models') ? cleanBase : `${cleanBase}/models`;
+    const headers: Record<string, string> = {
+      'Accept': 'application/json',
+      'User-Agent': 'aistudio-custom-model-fetcher',
+    };
+
+    if (apiKey) {
+      if (authHeaderType === 'none') {
+        // no auth header
+      } else if (authHeaderType === 'x-api-key') {
+        headers['x-api-key'] = apiKey.trim();
+      } else if (authHeaderType === 'custom' && customHeaderName) {
+        headers[customHeaderName.trim()] = apiKey.trim();
+      } else {
+        headers['Authorization'] = `Bearer ${apiKey.trim()}`;
+      }
+    }
+
+    const startTime = performance.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+
+    let resp = await fetch(targetUrl, { headers, signal: controller.signal }).catch(() => null);
+
+    // If 404 and cleanBase does not already contain /v1, try fallback to /v1/models
+    if ((!resp || resp.status === 404) && !cleanBase.includes('/v1')) {
+      targetUrl = `${cleanBase}/v1/models`;
+      const ctrl2 = new AbortController();
+      const t2 = setTimeout(() => ctrl2.abort(), 10000);
+      resp = await fetch(targetUrl, { headers, signal: ctrl2.signal }).catch(() => null);
+      clearTimeout(t2);
+    }
+    clearTimeout(timeout);
+
+    if (!resp) {
+      return res.status(502).json({
+        success: false,
+        error: 'Không thể kết nối đến máy chủ Base URL đã cung cấp. Vui lòng kiểm tra lại địa chỉ hoặc tường lửa/mạng cục bộ.',
+      });
+    }
+
+    const latencyMs = Math.round(performance.now() - startTime);
+    if (!resp.ok) {
+      return res.status(resp.status).json({
+        success: false,
+        statusCode: resp.status,
+        error: `Máy chủ trả về HTTP ${resp.status} (${resp.statusText})`,
+        latencyMs,
+      });
+    }
+
+    const data = await resp.json().catch(() => null);
+    let models: string[] = [];
+    if (data) {
+      if (Array.isArray(data.data)) {
+        models = data.data.map((m: any) => (typeof m === 'string' ? m : m.id || m.name)).filter(Boolean);
+      } else if (Array.isArray(data.models)) {
+        models = data.models.map((m: any) => (typeof m === 'string' ? m : m.id || m.name)).filter(Boolean);
+      }
+    }
+
+    return res.json({
+      success: true,
+      statusCode: resp.status,
+      models,
+      count: models.length,
+      latencyMs,
+    });
+  } catch (err: any) {
+    const isTimeout = err.name === 'AbortError';
+    return res.status(isTimeout ? 408 : 500).json({
+      success: false,
+      error: isTimeout ? 'Quá thời gian kết nối (Timeout >12s)' : (err.message || 'Lỗi server khi tải model'),
     });
   }
 });

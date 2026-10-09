@@ -1,11 +1,14 @@
 import React from 'react';
-import { KeyRound, ShieldCheck, Sparkles, RefreshCw, CheckCircle2, AlertCircle, Bot, Terminal } from 'lucide-react';
+import { KeyRound, ShieldCheck, Sparkles, RefreshCw, CheckCircle2, AlertCircle, Bot, Terminal, Sliders } from 'lucide-react';
+
+export type AppTab = 'single' | 'batch' | 'custom' | 'chat' | 'history' | 'claude-config' | 'custom-providers';
 
 interface HeaderProps {
-  activeTab: 'single' | 'batch' | 'custom' | 'chat' | 'history' | 'claude-config';
-  onTabChange: (tab: 'single' | 'batch' | 'custom' | 'chat' | 'history' | 'claude-config') => void;
+  activeTab: AppTab;
+  onTabChange: (tab: AppTab) => void;
   systemGeminiConfigured: boolean;
   historyCount: number;
+  customProvidersCount?: number;
   onQuickTestSystemKey?: () => void;
 }
 
@@ -14,6 +17,7 @@ export const Header: React.FC<HeaderProps> = ({
   onTabChange,
   systemGeminiConfigured,
   historyCount,
+  customProvidersCount = 0,
   onQuickTestSystemKey,
 }) => {
   return (
@@ -111,6 +115,27 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <RefreshCw className="w-4 h-4" />
             Kiểm tra Hàng loạt (Batch)
+          </button>
+
+          <button
+            type="button"
+            id="tab-custom-providers"
+            onClick={() => onTabChange('custom-providers')}
+            className={`px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap flex items-center gap-2 ${
+              activeTab === 'custom-providers'
+                ? 'bg-neutral-900 text-white shadow-xs'
+                : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100'
+            }`}
+          >
+            <Sliders className="w-4 h-4 text-cyan-500" />
+            <span>Nhà cung cấp tùy chỉnh</span>
+            {customProvidersCount > 0 && (
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                activeTab === 'custom-providers' ? 'bg-cyan-500 text-white' : 'bg-cyan-100 text-cyan-800'
+              }`}>
+                {customProvidersCount}
+              </span>
+            )}
           </button>
 
           <button

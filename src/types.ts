@@ -1,6 +1,24 @@
-export type ApiProviderId = 'gemini' | 'openai' | 'anthropic' | 'groq' | 'deepseek' | 'openrouter' | 'kira' | 'custom';
+export type BuiltinProviderId = 'gemini' | 'openai' | 'anthropic' | 'groq' | 'deepseek' | 'openrouter' | 'kira' | 'custom';
+export type ApiProviderId = BuiltinProviderId | string;
 
 export type TestType = 'ping' | 'models' | 'prompt';
+
+export interface CustomProviderConfig {
+  id: string; // unique ID e.g. 'custom-1718291029' or slug
+  name: string; // e.g. "Ollama (Local)", "Mistral AI", "Together AI"
+  baseUrl: string; // e.g. "http://localhost:11434/v1", "https://api.mistral.ai/v1"
+  apiKey?: string; // Optional default test key
+  placeholder?: string; // e.g. "sk-..." or "Token..."
+  keyPrefix?: string; // e.g. "sk-", "Bearer "
+  authHeaderType: 'bearer' | 'x-api-key' | 'custom' | 'none';
+  customHeaderName?: string; // if authHeaderType === 'custom'
+  defaultModel: string; // e.g. "llama3.2", "mistral-large-latest"
+  availableModels: string[]; // List of available models
+  docsUrl?: string; // Documentation link
+  helpTip?: string; // Guidance / hint
+  color?: string; // Hex color code
+  createdAt: number;
+}
 
 export interface ProviderDefinition {
   id: ApiProviderId;
@@ -13,6 +31,8 @@ export interface ProviderDefinition {
   docsUrl: string;
   helpTip: string;
   color: string;
+  isCustom?: boolean;
+  customConfig?: CustomProviderConfig;
 }
 
 export interface DiagnosticInfo {

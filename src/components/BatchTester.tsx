@@ -12,11 +12,22 @@ import {
   Search,
   Filter,
   ShieldCheck,
+  Plus,
+  Server,
 } from 'lucide-react';
-import { ApiProviderId, BatchItemResult, BatchSummary } from '../types';
-import { PROVIDERS } from '../data/providers';
+import { ApiProviderId, BatchItemResult, BatchSummary, CustomProviderConfig } from '../types';
+import { getAllProviders } from '../utils/customProviders';
 
-export const BatchTester: React.FC = () => {
+interface BatchTesterProps {
+  customProviders?: CustomProviderConfig[];
+  onOpenCustomManager?: () => void;
+}
+
+export const BatchTester: React.FC<BatchTesterProps> = ({
+  customProviders,
+  onOpenCustomManager,
+}) => {
+  const allProviders = getAllProviders(customProviders);
   const [provider, setProvider] = useState<ApiProviderId>('gemini');
   const [rawKeysInput, setRawKeysInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -28,7 +39,7 @@ export const BatchTester: React.FC = () => {
   const [copiedValid, setCopiedValid] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
-  const activeProvider = PROVIDERS.find(p => p.id === provider) || PROVIDERS[0];
+  const activeProvider = allProviders.find(p => p.id === provider) || allProviders[0];
 
   // Parse lines
   const parsedKeys = rawKeysInput
@@ -44,15 +55,26 @@ export const BatchTester: React.FC = () => {
     setResults([]);
     setSummary(null);
 
+    const payload: any = {
+      provider,
+      keys: parsedKeys,
+      testType: 'ping',
+    };
+
+    if (activeProvider.customConfig) {
+      payload.customConfig = {
+        baseUrl: activeProvider.customConfig.baseUrl,
+        authHeaderType: activeProvider.customConfig.authHeaderType,
+        customHeaderName: activeProvider.customConfig.customHeaderName,
+        defaultModel: activeProvider.customConfig.defaultModel,
+      };
+    }
+
     try {
       const res = await fetch('/api/test-batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider,
-          keys: parsedKeys,
-          testType: 'ping',
-        }),
+        body: JSON.stringify(payload),
       });
 
       setProgress(80);
@@ -120,11 +142,23 @@ export const BatchTester: React.FC = () => {
     <div className="space-y-6">
       {/* Provider Selector */}
       <div>
-        <label className="block text-xs font-bold text-neutral-700 uppercase tracking-wider mb-2">
-          1. Chọn Dịch vụ API cần kiểm tra hàng loạt
-        </label>
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-xs font-bold text-neutral-700 uppercase tracking-wider">
+            1. Chọn Dịch vụ API cần kiểm tra hàng loạt
+          </label>
+          {onOpenCustomManager && (
+            <button
+              type="button"
+              onClick={onOpenCustomManager}
+              className="px-2.5 py-1 text-xs font-semibold text-cyan-700 hover:text-cyan-900 bg-cyan-50 hover:bg-cyan-100 rounded-lg border border-cyan-200 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Thêm Nhà cung cấp tùy chỉnh
+            </button>
+          )}
+        </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2">
-          {PROVIDERS.filter(p => p.id !== 'custom').map(p => {
+          {allProviders.map(p => {
             const isSelected = provider === p.id;
             return (
               <button
@@ -132,14 +166,21 @@ export const BatchTester: React.FC = () => {
                 type="button"
                 id={`batch-provider-${p.id}`}
                 onClick={() => setProvider(p.id)}
-                className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                className={`flex items-center justify-between gap-1.5 p-2.5 rounded-xl border text-xs font-semibold transition-all ${
                   isSelected
                     ? 'border-blue-600 bg-blue-50/50 text-blue-900 ring-1 ring-blue-500'
                     : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
                 }`}
               >
-                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
-                <span className="truncate">{p.name}</span>
+                <div className="flex items-center gap-2 truncate">
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
+                  <span className="truncate">{p.name}</span>
+                </div>
+                {p.isCustom && (
+                  <span className="text-[9px] font-semibold text-cyan-700 bg-cyan-50 px-1 py-0.2 rounded border border-cyan-200/50 shrink-0">
+                    Tùy chỉnh
+                  </span>
+                )}
               </button>
             );
           })}

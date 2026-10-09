@@ -1,21 +1,33 @@
 import React, { useState, useEffect } from 'react';
-import { Header } from './components/Header';
+import { Header, AppTab } from './components/Header';
 import { SingleTester } from './components/SingleTester';
 import { BatchTester } from './components/BatchTester';
 import { CustomTester } from './components/CustomTester';
 import { HistoryViewer } from './components/HistoryViewer';
 import { ChatBotTester } from './components/ChatBotTester';
 import { ClaudeConfigViewer } from './components/ClaudeConfigViewer';
-import { TestResult, ApiProviderId } from './types';
+import { CustomProvidersManager } from './components/CustomProvidersManager';
+import { TestResult, ApiProviderId, CustomProviderConfig } from './types';
+import { getCustomProviders, subscribeCustomProviders } from './utils/customProviders';
 import { ShieldCheck, HelpCircle, AlertCircle, CheckCircle2, Lock } from 'lucide-react';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'single' | 'batch' | 'custom' | 'chat' | 'history' | 'claude-config'>('single');
+  const [activeTab, setActiveTab] = useState<AppTab>('single');
   const [systemGeminiConfigured, setSystemGeminiConfigured] = useState(false);
   const [chatInitialProvider, setChatInitialProvider] = useState<ApiProviderId>('gemini');
   const [chatInitialKey, setChatInitialKey] = useState<string>('');
   const [claudeInitialKey, setClaudeInitialKey] = useState<string>('');
   const [claudeInitialProvider, setClaudeInitialProvider] = useState<ApiProviderId>('anthropic');
+  const [selectedCustomProviderForTest, setSelectedCustomProviderForTest] = useState<string | null>(null);
+
+  const [customProviders, setCustomProviders] = useState<CustomProviderConfig[]>(() => getCustomProviders());
+
+  useEffect(() => {
+    return subscribeCustomProviders(updated => {
+      setCustomProviders(updated);
+    });
+  }, []);
+
   const [history, setHistory] = useState<TestResult[]>(() => {
     try {
       const saved = localStorage.getItem('api_key_test_history');
@@ -62,6 +74,7 @@ export default function App() {
         onTabChange={setActiveTab}
         systemGeminiConfigured={systemGeminiConfigured}
         historyCount={history.length}
+        customProvidersCount={customProviders.length}
         onQuickTestSystemKey={() => {
           setActiveTab('single');
         }}
@@ -71,8 +84,12 @@ export default function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {activeTab === 'single' && (
           <SingleTester
+            key={selectedCustomProviderForTest || 'single-tester'}
+            customProviders={customProviders}
+            initialProvider={selectedCustomProviderForTest || undefined}
             onAddHistory={handleAddHistory}
             systemGeminiConfigured={systemGeminiConfigured}
+            onOpenCustomManager={() => setActiveTab('custom-providers')}
             onOpenChat={(prov, key) => {
               setChatInitialProvider(prov);
               setChatInitialKey(key);
@@ -89,6 +106,7 @@ export default function App() {
         {activeTab === 'chat' && (
           <ChatBotTester
             key={`${chatInitialProvider}-${chatInitialKey}`}
+            customProviders={customProviders}
             systemGeminiConfigured={systemGeminiConfigured}
             onAddHistory={handleAddHistory}
             initialProvider={chatInitialProvider}
@@ -103,7 +121,23 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'batch' && <BatchTester />}
+        {activeTab === 'batch' && (
+          <BatchTester
+            customProviders={customProviders}
+            onOpenCustomManager={() => setActiveTab('custom-providers')}
+          />
+        )}
+
+        {activeTab === 'custom-providers' && (
+          <CustomProvidersManager
+            customProviders={customProviders}
+            onSelectProviderForTest={(providerId) => {
+              setSelectedCustomProviderForTest(providerId);
+              setActiveTab('single');
+            }}
+            onClose={() => setActiveTab('single')}
+          />
+        )}
 
         {activeTab === 'custom' && <CustomTester onAddHistory={handleAddHistory} />}
 

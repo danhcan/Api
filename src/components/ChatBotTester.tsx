@@ -17,11 +17,12 @@ import {
   Sparkles,
   RefreshCw,
 } from 'lucide-react';
-import { ApiProviderId, ChatMessage, TestResult } from '../types';
-import { PROVIDERS } from '../data/providers';
+import { ApiProviderId, ChatMessage, TestResult, CustomProviderConfig } from '../types';
+import { getAllProviders } from '../utils/customProviders';
 
 interface ChatBotTesterProps {
   systemGeminiConfigured?: boolean;
+  customProviders?: CustomProviderConfig[];
   onAddHistory?: (result: TestResult) => void;
   initialProvider?: ApiProviderId;
   initialApiKey?: string;
@@ -29,10 +30,12 @@ interface ChatBotTesterProps {
 
 export const ChatBotTester: React.FC<ChatBotTesterProps> = ({
   systemGeminiConfigured,
+  customProviders,
   onAddHistory,
   initialProvider,
   initialApiKey,
 }) => {
+  const allProviders = getAllProviders(customProviders);
   const [provider, setProvider] = useState<ApiProviderId>(initialProvider || 'gemini');
   const [apiKey, setApiKey] = useState(initialApiKey || '');
   const [showKey, setShowKey] = useState(false);
@@ -51,14 +54,17 @@ export const ChatBotTester: React.FC<ChatBotTesterProps> = ({
   const timerRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const currentProvider = PROVIDERS.find(p => p.id === provider) || PROVIDERS[0];
+  const currentProvider = allProviders.find(p => p.id === provider) || allProviders[0];
   const isUsingSystemKey = provider === 'gemini' && apiKey === '__USE_ENV_GEMINI__';
 
-  // Set default model when provider changes
+  // Set default model and prefill key when provider changes
   useEffect(() => {
     if (currentProvider && currentProvider.availableModels.length > 0) {
       setSelectedModel(currentProvider.defaultModel);
       setCustomModel('');
+    }
+    if (currentProvider.isCustom && currentProvider.customConfig?.apiKey && !apiKey) {
+      setApiKey(currentProvider.customConfig.apiKey);
     }
   }, [provider]);
 
@@ -93,7 +99,10 @@ export const ChatBotTester: React.FC<ChatBotTesterProps> = ({
     const textToSend = (customText || inputPrompt).trim();
     if (!textToSend || isLoading) return;
 
-    if (!apiKey && !(provider === 'gemini' && systemGeminiConfigured)) {
+    const isCustom = currentProvider.isCustom;
+    const authNone = currentProvider.customConfig?.authHeaderType === 'none';
+
+    if (!apiKey && !(provider === 'gemini' && systemGeminiConfigured) && !authNone) {
       alert('Vui lòng nhập API Key hoặc chọn "Dùng System Key" để bắt đầu trò chuyện.');
       return;
     }
@@ -125,6 +134,9 @@ export const ChatBotTester: React.FC<ChatBotTesterProps> = ({
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
           systemInstruction: systemInstruction.trim() || undefined,
           temperature,
+          customBaseUrl: currentProvider.customConfig?.baseUrl,
+          customAuthHeaderType: currentProvider.customConfig?.authHeaderType,
+          customHeaderName: currentProvider.customConfig?.customHeaderName,
         }),
       });
 
@@ -265,9 +277,9 @@ export const ChatBotTester: React.FC<ChatBotTesterProps> = ({
               onChange={e => setProvider(e.target.value as ApiProviderId)}
               className="w-full px-3 py-2 text-xs font-medium bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
             >
-              {PROVIDERS.filter(p => p.id !== 'custom').map(p => (
+              {allProviders.map(p => (
                 <option key={p.id} value={p.id}>
-                  {p.name}
+                  {p.name} {p.isCustom ? '(Tùy chỉnh)' : ''}
                 </option>
               ))}
             </select>
